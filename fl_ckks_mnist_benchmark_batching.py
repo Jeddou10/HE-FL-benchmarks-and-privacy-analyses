@@ -2,7 +2,7 @@
 FL + CKKS (TenSEAL) MNIST Benchmark — Client-side encryption batching
 --------------------------------------------------------------------
 
-What this adds (vs. your baseline script)
+What this adds (vs. baseline script)
 - Adds an **encryption-batching** mode to reduce peak memory and peak server deserialization
   costs when many clients produce large serialized ciphertexts.
 
@@ -18,20 +18,9 @@ Design
   (there are far fewer of these) and sums them to obtain the final encrypted aggregate.
 - This reduces peak memory and the number of live ckks_vector objects during aggregation.
 
-Notes
+Note
 - Communication bytes are still counted as the sum of client serialized ciphertexts (the network cost doesn't change),
   but the server memory and number of simultaneous deserializations is reduced.
-- The protocol semantics don't change: server still only sees public-context ciphertexts and the key-owner performs decryption.
-
-Flags added
-- `--enc-batch-size` (int, default 0): if 0, original behaviour (no batching). If >0, process clients in batches of this size.
-
-Usage examples
-- No batching (original behavior):
-    python fl_ckks_mnist_benchmark.py --clients 20 --rounds 3 --local-epochs 1 --iid
-
-- Batching with groups of 10 clients:
-    python fl_ckks_mnist_benchmark.py --clients 100 --rounds 3 --local-epochs 1 --iid --enc-batch-size 10
 
 """
 import argparse
@@ -107,14 +96,14 @@ def build_datasets(data_dir: str):
     test = datasets.MNIST(data_dir, train=False, download=True, transform=tfm)
     return train, test
 
-
+# iid partition of data
 def iid_partition(train_dataset, num_clients: int):
     N = len(train_dataset)
     idxs = np.random.permutation(N)
     splits = np.array_split(idxs, num_clients)
     return [list(s) for s in splits]
 
-
+# dirichlet partition of data
 def dirichlet_partition(train_dataset, num_clients: int, alpha: float = 0.3):
     labels = np.array(train_dataset.targets)
     num_classes = labels.max() + 1
@@ -139,7 +128,7 @@ def dirichlet_partition(train_dataset, num_clients: int, alpha: float = 0.3):
 # ----------------------------
 
 def get_model_vector(model: nn.Module) -> np.ndarray:
-    """Flatten model parameters to a single 1-D numpy array."""
+    #Flatten model parameters to a single 1-D numpy array.
     with torch.no_grad():
         return np.concatenate([
             p.detach().cpu().numpy().ravel() for p in model.parameters()
@@ -147,7 +136,7 @@ def get_model_vector(model: nn.Module) -> np.ndarray:
 
 
 def set_model_from_vector(model: nn.Module, vec: np.ndarray):
-    """Load flattened vector back into model parameters."""
+    #Load flattened vector back into model parameters.
     offset = 0
     with torch.no_grad():
         for p in model.parameters():
@@ -165,7 +154,7 @@ def apply_delta(old: np.ndarray, delta: np.ndarray) -> np.ndarray:
 
 
 def train_local(model: nn.Module, loader: data.DataLoader, device: torch.device, epochs: int = 1, lr: float = 0.1):
-    """Train the *provided* model (already seeded with global weights)."""
+    #Train the *provided* model (already seeded with global weights).
     model = model.to(device)
     model.train()
 
@@ -462,35 +451,67 @@ def run_benchmark(args):
 import sys
 
 if __name__ == "__main__":
-    #arr = [2, 5, 10, 20, 50, 100]
-    #for i in arr:
-        parser = argparse.ArgumentParser(description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark — Batching")
-        parser.add_argument('--data', type=str, default='./data')
-        parser.add_argument('--outdir', type=str, default='./runs/ckks_mnist_batch')
-        parser.add_argument('--clients', type=int, default=2)
-        parser.add_argument('--participation', type=float, default=1.0)
-        parser.add_argument('--rounds', type=int, default=10)
-        parser.add_argument('--local-epochs', type=int, default=1)
-        parser.add_argument('--batch-size', type=int, default=64)
-        parser.add_argument('--lr', type=float, default=0.1)
+    parser = argparse.ArgumentParser(
+        description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark — Batching"
+    )
 
-        part = parser.add_mutually_exclusive_group()
-        part.add_argument('--iid', action='store_true')
-        part.add_argument('--dirichlet-alpha', type=float, default=0.3)
+    parser.add_argument('--data', type=str, default='./data')
+    # Path to dataset storage / load directory
 
-        parser.add_argument('--poly-mod-degree', type=int, default=16_384)
-        parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+', default=[60, 40, 60])
-        parser.add_argument('--scale-bits', type=int, default=40)
+    parser.add_argument('--outdir', type=str, default='./runs/ckks_mnist_batch')
+    # Directory to save experiment outputs (metrics, logs, reconstructed artifacts, etc.)
 
-        # Batching control
-        parser.add_argument('--enc-batch-size', type=int, default=5,
-                            help='0 -> no batching (original), >0 -> number of clients per encryption batch')
+    parser.add_argument('--clients', type=int, default=2)
+    # Number of federated clients to simulate
 
+    parser.add_argument('--participation', type=float, default=1.0)
+    # Fraction of clients sampled each round (1.0 = all clients participate)
 
-        parser.add_argument('--cpu', action='store_true')
-        parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--rounds', type=int, default=10)
+    # Number of federated training rounds to run
 
-        # This line ignores Jupyter's extra args like "-f /path/to/kernel.json"
-        args, _ = parser.parse_known_args()
+    parser.add_argument('--local-epochs', type=int, default=1)
+    # Number of local epochs each client performs per round
 
-        run_benchmark(args)
+    parser.add_argument('--batch-size', type=int, default=64)
+    # Batch size used for local training on each client
+
+    parser.add_argument('--lr', type=float, default=0.1)
+    # Learning rate for the local SGD optimizer
+
+    part = parser.add_mutually_exclusive_group()
+    # Create a mutually exclusive group so only one of the following options can be selected
+
+    part.add_argument('--iid', action='store_true')
+    # If set, use IID partitioning across clients
+
+    part.add_argument('--dirichlet-alpha', type=float, default=0.3)
+    # Dirichlet concentration parameter alpha for non-IID partitioning (ignored if --iid is set)
+
+    parser.add_argument('--poly-mod-degree', type=int, default=16_384)
+    # CKKS polynomial modulus degree (affects slot count and security level)
+
+    parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+', default=[60, 40, 60])
+    # Coefficient-modulus chain bit-sizes for CKKS (controls precision & noise budget)
+
+    parser.add_argument('--scale-bits', type=int, default=40)
+    # Number of bits used for CKKS scaling factor (encoding precision)
+
+    # Batching control
+    parser.add_argument(
+        '--enc-batch-size', type=int, default=5,
+        help='0 -> no batching (original), >0 -> number of clients per encryption batch'
+    )
+    # Number of client updates to pack per encryption/aggregation batch:
+    #   0 => disable batching (each client encrypted separately),
+    #   >0 => group this many client updates into a single batched encryption/aggregation unit
+
+    parser.add_argument('--cpu', action='store_true')
+    # Force CPU-only execution (disable GPU usage)
+
+    parser.add_argument('--seed', type=int, default=42)
+    # Random seed for reproducibility (data splits, training, DP randomness, etc.)
+
+    args, _ = parser.parse_known_args()
+
+    run_benchmark(args)
