@@ -5,9 +5,6 @@ FL + CKKS (TenSEAL) MNIST Benchmark — HE + Differential Privacy (DP)
 This variant extends the baseline HE-only script (no quantization, no selection,
 no batching by default) to support simple Differential Privacy mechanisms.
 
-Design choices
-- Keep the same FL loop and CKKS aggregation as your original script.
-- Add **per-client gradient clipping** to bound sensitivity.
 - Support two DP modes:
   1. `client` (local DP): each client clips its weighted update and adds Gaussian noise
      **before** encryption. This provides local differential privacy (stronger, but may
@@ -18,28 +15,10 @@ Design choices
      ciphertext aggregate before decryption. This is the centralized DP model.
 - Both modes require per-client clipping (L2) of `w * delta` to `dp_clip` to bound sensitivity.
 
-Notes and limitations
-- This is a research scaffold. Proper (ε,δ)-DP accounting (e.g., moments accountant, Rényi DP)
-  is **not** implemented. `dp_sigma` here is a user-controlled noise multiplier; converting to
-  (ε,δ) requires additional analysis (dependent on sampling, number of rounds, composition).
+Note
 - Server-side encrypted noise creation uses the public TenSEAL context to encrypt random noise
   vectors and add them to the ciphertext aggregate. This avoids revealing the noise to the server
   in plaintext.
-
-Flags added
-- `--dp-mode {none,client,server}` (default `none`)
-- `--dp-clip` (float, default `1.0`) L2 clipping bound per-client on weighted update
-- `--dp-sigma` (float, default `0.1`) noise multiplier (std = dp_sigma * dp_clip)
-
-Run default (no DP, behaves like baseline):
-    python fl_ckks_mnist_benchmark_dp.py
-
-Example client-DP:
-    python fl_ckks_mnist_benchmark_dp.py --dp-mode client --dp-clip 1.0 --dp-sigma 0.5
-
-Example server-DP:
-    python fl_ckks_mnist_benchmark_dp.py --dp-mode server --dp-clip 1.0 --dp-sigma 0.5
-
 """
 
 import argparse
@@ -145,7 +124,7 @@ def dirichlet_partition(train_dataset, num_clients: int, alpha: float = 0.3):
 # ----------------------------
 
 def get_model_vector(model: nn.Module) -> np.ndarray:
-    """Flatten model parameters to a single 1-D numpy array."""
+    #Flatten model parameters to a single 1-D numpy array.
     with torch.no_grad():
         return np.concatenate([
             p.detach().cpu().numpy().ravel() for p in model.parameters()
@@ -153,7 +132,7 @@ def get_model_vector(model: nn.Module) -> np.ndarray:
 
 
 def set_model_from_vector(model: nn.Module, vec: np.ndarray):
-    """Load flattened vector back into model parameters."""
+    #Load flattened vector back into model parameters.
     offset = 0
     with torch.no_grad():
         for p in model.parameters():
@@ -171,7 +150,7 @@ def apply_delta(old: np.ndarray, delta: np.ndarray) -> np.ndarray:
 
 
 def train_local(model: nn.Module, loader: data.DataLoader, device: torch.device, epochs: int = 1, lr: float = 0.1):
-    """Train the *provided* model (already seeded with global weights)."""
+    #Train the *provided* model (already seeded with global weights).
     model = model.to(device)
     model.train()
 
@@ -248,7 +227,7 @@ def decrypt_concat(secret_ctx, ct_list) -> np.ndarray:
 # ----------------------------
 
 def clip_vec(vec: np.ndarray, clip: float) -> np.ndarray:
-    """L2 clip a vector to norm `clip`."""
+    #L2 clip a vector to norm `clip`.
     norm = np.linalg.norm(vec)
     if norm > clip and norm > 0:
         return vec * (clip / norm)
@@ -256,7 +235,7 @@ def clip_vec(vec: np.ndarray, clip: float) -> np.ndarray:
 
 
 def make_gauss_noise(shape, sigma, clip):
-    """Gaussian noise with std = sigma * clip (per-coordinate iid)."""
+    #Gaussian noise with std = sigma * clip (per-coordinate iid).
     return np.random.normal(loc=0.0, scale=float(sigma * clip), size=shape).astype(np.float64)
 
 
@@ -462,33 +441,78 @@ def run_benchmark(args):
 import sys
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark — HE + DP")
+    parser = argparse.ArgumentParser(
+        description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark — HE + DP")
+
     parser.add_argument('--data', type=str, default='./data')
-    parser.add_argument('--outdir', type=str, default='./runs/ckks_mnist_dp')
+    # Path to dataset storage / load directory
+    parser.add_argument('--outdir', type=str,
+                        default='./runs/ckks_mnist_dp')
+    # Output directory for run artifacts (metrics, logs, etc.)
+
     parser.add_argument('--clients', type=int, default=10)
-    parser.add_argument('--participation', type=float, default=1.0)
+    # Number of federated clients to simulate
+
+    parser.add_argument('--participation', type=float,
+                        default=1.0)
+    # Fraction of clients sampled each round (1.0 = all)
+
     parser.add_argument('--rounds', type=int, default=100)
+    # Number of federated training rounds to run
+
     parser.add_argument('--local-epochs', type=int, default=1)
+    # Local epochs each client runs per round
+
     parser.add_argument('--batch-size', type=int, default=64)
+    # Batch size for local training
+
     parser.add_argument('--lr', type=float, default=0.1)
+    # Learning rate for local SGD
 
     part = parser.add_mutually_exclusive_group()
-    part.add_argument('--iid', action='store_true')
-    part.add_argument('--dirichlet-alpha', type=float, default=0.3)
+    # Create a group that enforces mutual exclusivity between options
 
-    parser.add_argument('--poly-mod-degree', type=int, default=16_384)
-    parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+', default=[60, 40, 60])
-    parser.add_argument('--scale-bits', type=int, default=40)
+    part.add_argument('--iid', action='store_true')
+    # If set, use IID partitioning across clients
+
+    part.add_argument('--dirichlet-alpha', type=float,
+                      default=0.3)
+    # Dirichlet concentration alpha for non-IID partitioning (ignored if --iid set)
+
+    parser.add_argument('--poly-mod-degree', type=int,
+                        default=16_384)
+    # CKKS polynomial modulus degree (affects slot count & security level)
+
+    parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+',
+                        default=[60, 40, 60])
+    # Coefficient-modulus chain bit-sizes for CKKS (precision & noise budget)
+
+    parser.add_argument('--scale-bits', type=int,
+                        default=40)
+    # Number of bits used for CKKS scaling factor (encoding precision)
 
     # DP controls
-    parser.add_argument('--dp-mode', type=str, choices=['none','client','server'], default='client', help='none=disable DP, client=local DP (noise added before encryption), server=central DP (encrypted noise added before decryption)')
-    parser.add_argument('--dp-clip', type=float, default=1.0, help='L2 clipping bound for per-client weighted update')
-    parser.add_argument('--dp-sigma', type=float, default=0.1, help='Gaussian noise multiplier: std = dp_sigma * dp_clip')
+    parser.add_argument(
+        '--dp-mode', type=str, choices=['none', 'client', 'server'], default='client',
+        help='none=disable DP, client=local DP (noise added before encryption), server=central DP (encrypted noise added before decryption)'
+    )  # Toggle DP behavior: none/client/server with explicit semantics in help
+
+    parser.add_argument('--dp-clip', type=float, default=1.0,
+                        help='L2 clipping bound for per-client weighted update')
+    # L2 clip bound used before adding DP noise
+
+    parser.add_argument('--dp-sigma', type=float, default=0.1,
+                        help='Gaussian noise multiplier: std = dp_sigma * dp_clip')
+    # Noise multiplier for Gaussian mechanism (std = sigma * clip)
 
     parser.add_argument('--cpu', action='store_true')
-    parser.add_argument('--seed', type=int, default=42)
+    # Force CPU-only execution (disable GPU use)
 
-    # This line ignores Jupyter's extra args like "-f /path/to/kernel.json"
+    parser.add_argument('--seed', type=int,
+                        default=42)
+    # RNG seed for reproducibility (partitions, training, DP randomness, etc.)
+
     args, _ = parser.parse_known_args()
 
     run_benchmark(args)
+
