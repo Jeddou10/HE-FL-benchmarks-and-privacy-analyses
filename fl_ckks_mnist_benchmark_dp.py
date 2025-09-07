@@ -444,6 +444,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark — HE + DP")
 
+
     parser.add_argument('--data', type=str, default='./data')
     # Path to dataset storage / load directory
     parser.add_argument('--outdir', type=str,
