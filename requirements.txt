@@ -1,5 +1,5 @@
 # Core scientific stack
-numpy==1.26.4           # Latest stable 1.x version, compatible with most packages
+numpy==1.26.4
 pandas>=1.5
 matplotlib>=3.6
 
