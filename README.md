@@ -164,4 +164,4 @@ Each privacy benchmark produces:
 
 All experiments in the thesis can be replicated using the provided scripts and Docker environment. To cite or reference this work, please refer to the bachelor thesis:
 
-Privacy Meets Performance: Rethinking Homomorphic Encryption in Federated Learning, 2025.
+Privacy Meets Performance: Rethinking Homomorphic Encryption in Federated Learning, Oussama Jeddou, 2025.
