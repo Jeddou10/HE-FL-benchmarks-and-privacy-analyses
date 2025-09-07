@@ -1,9 +1,9 @@
 """
-FL + CKKS (TenSEAL) MNIST Benchmark — fixed accuracy version
+FL + CKKS (TenSEAL) MNIST Benchmark
 ------------------------------------------------------------
 
 What this script does
-- Simulates a realistic cross-device FL round loop on MNIST with a variable number of clients.
+- Simulates a realistic FL round loop on MNIST with a variable number of clients.
 - Trains a small MLP locally on each client for a few epochs per round.
 - Measures a broad set of metrics:
   * Local training time (aggregate across clients)
@@ -16,26 +16,8 @@ What this script does
 - Outputs logs to a CSV and a JSONL file for easy analysis.
 
 Notes
-- The server performs homomorphic aggregation using a *public* TenSEAL context (no secret key).
+- The server performs homomorphic aggregation using a *public* TenSEAL context .
 - Decryption is performed by a "key owner" (simulating a trusted party or collective decrypt) using the *secret* context.
-- This is a research scaffold: tune model, optimizer, HE params, and partitioning to your needs.
-
-Key fixes vs your version
-- **Do not reinitialize client models** inside `train_local`; we now train the copy seeded with the *current global weights*.
-- **Correct FedAvg weighting**: use exact client dataset sizes and apply weights **before encryption** (client-side), so the server just sums ciphertexts.
-- **Remove buggy in-loop mutation** of plaintext deltas during HE aggregation.
-- Minor: expose `--lr` and default to a stable setting for MNIST MLP.
-
-Requirements
-- Python 3.9+
-- torch, torchvision, numpy, pandas, psutil (optional), tenseal
-
-Example
-- IID, 20 clients, 3 rounds, 1 local epoch:
-  python fl_ckks_mnist_benchmark.py --clients 20 --rounds 3 --local-epochs 1 --iid
-
-- Non-IID (Dirichlet alpha=0.3), 50 clients:
-  python fl_ckks_mnist_benchmark.py --clients 50 --rounds 5 --dirichlet-alpha 0.3
 
 """
 import argparse
@@ -110,14 +92,14 @@ def build_datasets(data_dir: str):
     test = datasets.MNIST(data_dir, train=False, download=True, transform=tfm)
     return train, test
 
-
+# iid partition of data
 def iid_partition(train_dataset, num_clients: int):
     N = len(train_dataset)
     idxs = np.random.permutation(N)
     splits = np.array_split(idxs, num_clients)
     return [list(s) for s in splits]
 
-
+# dirichlet partition of data
 def dirichlet_partition(train_dataset, num_clients: int, alpha: float = 0.3):
     labels = np.array(train_dataset.targets)
     num_classes = labels.max() + 1
@@ -142,7 +124,7 @@ def dirichlet_partition(train_dataset, num_clients: int, alpha: float = 0.3):
 # ----------------------------
 
 def get_model_vector(model: nn.Module) -> np.ndarray:
-    """Flatten model parameters to a single 1-D numpy array."""
+    #Flatten model parameters to a single 1-D numpy array.
     with torch.no_grad():
         return np.concatenate([
             p.detach().cpu().numpy().ravel() for p in model.parameters()
@@ -150,7 +132,7 @@ def get_model_vector(model: nn.Module) -> np.ndarray:
 
 
 def set_model_from_vector(model: nn.Module, vec: np.ndarray):
-    """Load flattened vector back into model parameters."""
+    #Load flattened vector back into model parameters.
     offset = 0
     with torch.no_grad():
         for p in model.parameters():
@@ -168,7 +150,7 @@ def apply_delta(old: np.ndarray, delta: np.ndarray) -> np.ndarray:
 
 
 def train_local(model: nn.Module, loader: data.DataLoader, device: torch.device, epochs: int = 1, lr: float = 0.1):
-    """Train the *provided* model (already seeded with global weights)."""
+    #Train the *provided* model (already seeded with global weights).
     model = model.to(device)
     model.train()
 
@@ -417,27 +399,56 @@ import sys
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Federated Learning + CKKS (TenSEAL) MNIST Benchmark")
+
     parser.add_argument('--data', type=str, default='./data')
+    # Path where MNIST (and other datasets) will be stored/loaded.
+
     parser.add_argument('--outdir', type=str, default='./runs/ckks_mnist')
+    # Directory to write run outputs (metrics, logs, artifacts).
+
     parser.add_argument('--clients', type=int, default=2)
+    # Number of federated clients to simulate.
+
     parser.add_argument('--participation', type=float, default=1.0)
+    # Fraction of clients sampled per round (1.0 = all clients participate).
+
     parser.add_argument('--rounds', type=int, default=10)
+    # Number of federated training rounds to execute.
+
     parser.add_argument('--local-epochs', type=int, default=1)
+    # Number of local training epochs each client runs per round.
+
     parser.add_argument('--batch-size', type=int, default=64)
+    # Local training batch size on each client.
+
     parser.add_argument('--lr', type=float, default=0.1)
+    # Learning rate for clients' local optimizer (SGD).
 
     part = parser.add_mutually_exclusive_group()
+    # Create a group where only one of the following mutually exclusive options may be provided.
+
     part.add_argument('--iid', action='store_true')
+    # If set, use IID data partitioning across clients.
+
     part.add_argument('--dirichlet-alpha', type=float, default=0.3)
+    # Dirichlet concentration alpha for non-IID partitioning (ignored if --iid is set).
 
     parser.add_argument('--poly-mod-degree', type=int, default=16_384)
+    # CKKS polynomial modulus degree (affects slot capacity and security level).
+
     parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+', default=[60, 40, 60])
+    # Coefficient-modulus chain bit-sizes for CKKS (controls precision and noise budget).
+
     parser.add_argument('--scale-bits', type=int, default=40)
+    # Number of bits used for CKKS scaling factor (encoding precision).
 
     parser.add_argument('--cpu', action='store_true')
-    parser.add_argument('--seed', type=int, default=42)
+    # Force CPU execution (disable GPU use).
 
-    # This line ignores Jupyter's extra args like "-f /path/to/kernel.json"
+    parser.add_argument('--seed', type=int, default=42)
+    # RNG seed for reproducibility (data splits, training, DP randomness, etc.).
+
     args, _ = parser.parse_known_args()
 
     run_benchmark(args)
+
