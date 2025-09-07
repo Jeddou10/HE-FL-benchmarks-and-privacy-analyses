@@ -80,7 +80,7 @@ dp-privacy:
 		--attack_all \
 		--output_dir $(RUNS_DIR)/dp_privacy_example
 
-# Clean up run outputs
+# Clean up outputs
 clean:
 	rm -rf $(RUNS_DIR)/*
 
