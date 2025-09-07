@@ -4,20 +4,10 @@ Privacy Test Harness for FL + CKKS + Differential Privacy (DP)
 
 This script adapts the comprehensive threat-model harness (gradient inversion,
 membership inference, probing, timing leakage, collusion) to the HE+DP
-benchmark you provided. It mirrors the attack tests and logging style from
+benchmark. It mirrors the attack tests and logging style from
 the original "threat_model_full" harness while taking into account the
 DP mode (none / client / server) and the per-client clipping + Gaussian
-noise described in your DP benchmark.
-
-Notes / limitations
-- This is still a research scaffold: no formal (epsilon, delta) accounting
-  is performed. dp_sigma here is an input noise multiplier (std = dp_sigma * dp_clip).
-- TenSEAL is required. Run: pip install tenseal
-- This script is intended to be run on a machine with enough memory. CKKS
-  packing will break very large models; this is tuned for MNIST MLP.
-
-Usage examples
-    python fl_ckks_mnist_dp_privacy_tests.py --dp-mode client --dp-clip 1.0 --dp-sigma 0.5 --clients 8 --rounds 10 --attack-round 5 --outdir ./runs/dp_privacy
+noise described in DP benchmark.
 
 """
 
@@ -595,7 +585,7 @@ def run_privacy_tests(args):
             slice_idx = args.attack_slice_idx if args.attack_slice_idx is not None else 0
             s = param_slices[slice_idx]
             inv = inversion_attack_from_aggregate(agg_update, MLP(), s, img_shape=(1,28,28), steps=args.attack_steps, lr=args.attack_lr, restarts=args.attack_restarts, device=device)
-            # ALSO save reconstructed image to a fixed name: inversion.png
+            # save reconstructed: inversion.png
             save_image(inv['img'].squeeze(0), os.path.join(args.outdir, "inversion.png"))
             # save original that attacker is trying to reconstruct (undo normalization)
             orig_tensor = client_loaders[selected[0]].dataset[0][0].numpy()
@@ -670,62 +660,143 @@ def run_privacy_tests(args):
 # ----------------------------
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Privacy Test Harness for FL + CKKS + DP (MNIST)')
+
     parser.add_argument('--data', type=str, default='./data')
+    # Path where MNIST (and other datasets) will be stored/loaded.
+
     parser.add_argument('--outdir', type=str, default='./runs/ckks_mnist_dp_privacy')
+    # Directory to write run outputs (metrics, reconstructed artifacts, logs).
+
     parser.add_argument('--clients', type=int, default=8)
+    # Number of federated clients to simulate.
+
     parser.add_argument('--participation', type=float, default=1.0)
+    # Fraction of clients sampled each round (1.0 = all clients participate).
+
     parser.add_argument('--rounds', type=int, default=10)
+    # Number of federated training rounds to execute.
+
     parser.add_argument('--local-epochs', type=int, default=1)
+    # Number of local training epochs each client runs per round.
+
     parser.add_argument('--batch-size', type=int, default=64)
+    # Local training batch size on each client.
+
     parser.add_argument('--lr', type=float, default=0.1)
+    # Learning rate for clients' local optimizer (SGD).
 
     parser.add_argument('--attack-round', type=int, default=5)
+    # Round at which to execute attacks (e.g., run privacy tests after this round).
+
+
     parser.add_argument('--attack-all', action='store_true')
+    # If set, enable all attack types (convenience flag).
+
     parser.add_argument('--attack_inversion', action='store_true')
+    # Enable gradient inversion attacks (optimization-based reconstruction).
+
     parser.add_argument('--attack_membership', action='store_true')
+    # Enable membership inference attacks (threshold-based).
+
     parser.add_argument('--attack_membership_shadow', action='store_true')
+    # Enable shadow-model based membership inference attacks.
+
     parser.add_argument('--attack_probing', action='store_true')
+    # Enable probing/marker injection attacks.
+
     parser.add_argument('--attack_collusion', action='store_true')
+    # Enable collusion/additive-share reconstruction simulations.
+
     parser.add_argument('--attack_timing', action='store_true')
+    # Enable timing/size leakage analysis.
 
     parser.add_argument('--attack_steps', type=int, default=800)
+    # Number of optimization steps for inversion-style attacks.
+
     parser.add_argument('--attack_lr', type=float, default=0.05)
+    # Learning rate used by the inversion optimizer.
+
     parser.add_argument('--attack_restarts', type=int, default=2)
+    # Number of random restarts for inversion optimization.
+
     parser.add_argument('--attack_slice_idx', type=int, default=0)
+    # Index of model slice/parameter block to attack (if slicing is used).
+
     parser.add_argument('--attack_client', type=int, default=None)
+    # Specific client id to target with attacks (None => use sampled/selected client).
 
     parser.add_argument('--membership_threshold', type=float, default=0.5)
+    # Threshold used by simple loss-threshold membership inference.
+
     parser.add_argument('--probe_scale', type=float, default=1e-2)
+    # Magnitude scaling for probing/marker injections.
+
     parser.add_argument('--n_aggregators', type=int, default=3)
+    # Number of aggregator replicas simulated (used by some collusion scenarios).
+
     parser.add_argument('--collusion_k', type=int, default=1)
+    # Number of colluding parties assumed in collusion experiments.
 
     parser.add_argument('--shadow_epochs', type=int, default=3)
+    # Number of epochs used when training shadow models for membership inference.
+
     parser.add_argument('--shadow_lr', type=float, default=0.1)
+    # Learning rate for shadow-model training.
+
     parser.add_argument('--shadow_percentile', type=float, default=50.0)
+    # Percentile used to derive membership decision thresholds from shadow losses.
 
     parser.add_argument('--poly-mod-degree', type=int, default=16_384)
+    # CKKS polynomial modulus degree (affects slot capacity & security).
+
     parser.add_argument('--coeff-mod-bit-sizes', type=int, nargs='+', default=[60, 40, 60])
+    # Coefficient-modulus chain bit-sizes for CKKS (precision & noise budget).
+
     parser.add_argument('--scale-bits', type=int, default=40)
+    # Number of bits used for CKKS scaling factor (encoding precision).
 
     parser.add_argument('--iid', action='store_true')
+    # If set, use IID data partitioning across clients.
+
     parser.add_argument('--dirichlet-alpha', type=float, default=0.3)
+    # Dirichlet concentration alpha for non-IID partitioning (ignored if --iid is set).
 
     # DP controls
-    parser.add_argument('--dp-mode', type=str, choices=['none','client','server'], default='client')
+    parser.add_argument('--dp-mode', type=str, choices=['none', 'client', 'server'], default='client')
+    # DP mode: 'none' disables DP, 'client' adds local DP noise before encryption, 'server' adds encrypted noise at server.
+
     parser.add_argument('--dp-clip', type=float, default=1.0)
+    # L2 clipping bound for per-client weighted updates before adding DP noise.
+
     parser.add_argument('--dp-sigma', type=float, default=0.1)
+    # Gaussian noise multiplier for DP: std = dp_sigma * dp_clip.
 
     parser.add_argument('--cpu', action='store_true')
+    # Force CPU-only execution (disable GPU usage).
+
     parser.add_argument('--seed', type=int, default=42)
+    # RNG seed for reproducibility (partitions, training, DP randomness, etc.).
 
     args, unknown = parser.parse_known_args()
+    # Parse known args and collect any unknown extras into `unknown` (useful in wrapped contexts).
 
     # default: enable all attacks for quick comparison (can be disabled by user flags)
     args.attack_inversion = args.attack_inversion or True
+    # Ensure inversion attack is enabled by default (True unless explicitly set otherwise).
+
     args.attack_membership = args.attack_membership or True
+    # Ensure membership attack is enabled by default.
+
     args.attack_membership_shadow = args.attack_membership_shadow or True
+    # Ensure shadow-model membership attack is enabled by default.
+
     args.attack_probing = args.attack_probing or True
+    # Ensure probing attack is enabled by default.
+
     args.attack_collusion = args.attack_collusion or True
+    # Ensure collusion attack is enabled by default.
+
     args.attack_timing = args.attack_timing or True
+    # Ensure timing/size-leakage attack is enabled by default.
 
     run_privacy_tests(args)
